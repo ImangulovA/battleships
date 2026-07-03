@@ -15,4 +15,4 @@ ALLOWED_ORIGINS = "https://imangulova.github.io,http://localhost:5173,http://loc
 [[d1_databases]]
 binding = "DB"
 database_name = "battleships-stats"
-database_id = "PASTE_DATABASE_ID_HERE"
+database_id = "1f73069a-7751-43be-be83-f4dfe1e584ca"

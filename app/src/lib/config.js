@@ -5,7 +5,7 @@
 // URL of the global-stats Worker (see ../../backend/README.md). Leave '' to run
 // LOCAL-ONLY: every network call no-ops and nothing breaks. After
 // `wrangler deploy`, paste the printed workers.dev URL here and redeploy.
-export const STATS_API = '';
+export const STATS_API = 'https://battleships-stats.ru-catfishing.workers.dev';
 
 // Password that unlocks playing FUTURE (not-yet-released) days early. Share a
 // link like `?unlock=<this>&day=N` and the visitor can play ahead; the flag
