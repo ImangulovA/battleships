@@ -1,0 +1,19 @@
+node_modules
+app/build
+app/.svelte-kit
+app/package
+.DS_Store
+.env
+# scratch data files authors keep locally (raw puzzle drafts etc.)
+**/data/_*
+# Krazydad reference PDFs — used ONLY to calibrate difficulty locally; do NOT
+# republish (third-party copyrighted content). See CREDITS.md.
+sources/
+__pycache__/
+*.pyc
+
+# wrangler local cache/state (may hold account ids)
+.wrangler/
+
+# internal build recipe (contains personal email / infra details)
+docs/DAILY_PUZZLE_PLAYBOOK.md
