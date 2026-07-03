@@ -40,17 +40,26 @@
 
     if (record.finished) {
       view = 'end';
+      // Backfill stats for a day finished before the beacon fired (dropped
+      // beacon, or the global backend didn't exist yet). once() + server-side
+      // dedup by clientId make these idempotent, so re-sending is safe.
+      submitStart(dayIdx);
+      submitFinish(dayIdx, record.elapsedMs || 0, GAME.scoreOf ? GAME.scoreOf(record.result) : null);
       loadAgg();
     } else if (record.started) {
+      // Backfill a possibly-missed start beacon for an in-progress day.
+      submitStart(dayIdx);
       timer.start();
       view = 'play';
     } else {
       view = 'intro';
     }
 
+    // Tick every second: the countdown shows seconds, so a 30s interval made it
+    // look frozen.
     tick = setInterval(() => {
       untilMidnight = fmtTime(msUntilLocalMidnight());
-    }, 30000);
+    }, 1000);
     untilMidnight = fmtTime(msUntilLocalMidnight());
   });
 
