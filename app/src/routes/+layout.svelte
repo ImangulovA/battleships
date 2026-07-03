@@ -27,6 +27,7 @@
 <header>
   <a class="brand" href="{base}/">{GAME.title}</a>
   <nav>
+    <a class="hub" href="https://imangulova.github.io/games/">◂ All games</a>
     <a href="{base}/archive">Archive</a>
     <a href="{base}/stats">Stats</a>
     <button class="themebtn" onclick={toggle} aria-label="Toggle theme">
@@ -126,6 +127,13 @@
   }
   nav a:hover {
     text-decoration: underline;
+  }
+  nav a.hub {
+    color: var(--muted);
+    font-weight: 700;
+  }
+  nav a.hub:hover {
+    color: var(--ink);
   }
   .themebtn {
     border: var(--border);
