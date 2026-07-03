@@ -3,15 +3,19 @@
   // DAILY BATTLESHIPS (Bimaru) — puzzle UI.
   //
   // Find the hidden fleet. Ships are straight, never touch (not even at a
-  // corner). The numbers on the top/right count how many ship segments sit in
-  // that column/row. The fleet composition is shown below the board. Unique
-  // solution, solvable by pure logic — no guessing.
+  // corner). The numbers on the top/right show how many ship segments are placed
+  // vs. required in that column/row (current / clue). The fleet composition is
+  // shown below the board. Unique solution, solvable by pure logic — no guessing.
   //
   // INPUT
   //   Desktop: left-click a cell cycles  empty → ship → water → empty.
   //            left-drag paints ship · right-click / right-drag paints water.
   //   Mobile : pick a tool (🚢 Ship / 🌊 Water), then drag to paint;
   //            long-press a cell for a quick water mark.
+  //
+  // AUTO-WATER: once a row/column has as many ships as its clue (including 0),
+  // the remaining cells are auto-filled with water. That boxes ships in, so the
+  // fleet tray ticks completed ships and finished ships render solid.
   //
   // CONTRACT (see docs/GAME_CONTRACT.md): props puzzle/dayIdx/saved; callbacks
   // onstart() once, onprogress(state) on change, onfinish(result) once.
@@ -46,9 +50,14 @@
   let history = [];
   let startedOnce = false;
 
-  // effective state of a cell, givens included
+  // derived (recomputed each recount; read by draw())
+  let autoWater = new Set(); // water forced by a saturated row/col
+  let confirmedCells = new Set(); // ship cells that belong to a boxed-in ship
+
+  // effective state of a cell, givens + auto-water included
   const isShip = (r, c) => givenShip.has(key(r, c)) || ship.has(key(r, c));
-  const isWater = (r, c) => givenWater.has(key(r, c)) || water.has(key(r, c));
+  const isWater = (r, c) =>
+    givenWater.has(key(r, c)) || water.has(key(r, c)) || autoWater.has(key(r, c));
   const isLocked = (r, c) => givenShip.has(key(r, c)) || givenWater.has(key(r, c));
 
   // --- geometry -------------------------------------------------------------
@@ -59,17 +68,17 @@
   let accent = '#fdc800';
 
   function layout(cssW) {
-    cell = Math.max(28, Math.min(60, Math.floor(cssW / (C + 1.6))));
-    originX = Math.round(cell * 0.2);
-    originY = Math.round(cell * 0.95);
-    const w = originX + C * cell + Math.round(cell * 1.4);
+    cell = Math.max(30, Math.min(58, Math.floor(cssW / (C + 2.0))));
+    originX = Math.round(cell * 0.25);
+    originY = Math.round(cell * 1.05);
+    const w = originX + C * cell + Math.round(cell * 1.7);
     const h = originY + R * cell + Math.round(cell * 0.2);
     return { w, h };
   }
 
   function fit() {
     if (!wrap || !canvas) return;
-    const cssW = Math.min(wrap.clientWidth, 560);
+    const cssW = Math.min(wrap.clientWidth, 580);
     const { w, h } = layout(cssW);
     const dpr = window.devicePixelRatio || 1;
     canvas.style.width = w + 'px';
@@ -94,15 +103,32 @@
         }
     rowCount = rc;
     colCount = cc;
+    computeAutoWater();
     computeFleet();
   }
 
+  // A row/column that already holds as many ships as its clue can hold no more:
+  // every other cell in it must be water. Fill those in automatically.
+  function computeAutoWater() {
+    const aw = new Set();
+    const free = (r, c) =>
+      !isShip(r, c) && !givenWater.has(key(r, c)) && !water.has(key(r, c));
+    for (let r = 0; r < R; r++)
+      if (rowCount[r] === puzzle.rowClues[r])
+        for (let c = 0; c < C; c++) if (free(r, c)) aw.add(key(r, c));
+    for (let c = 0; c < C; c++)
+      if (colCount[c] === puzzle.colClues[c])
+        for (let r = 0; r < R; r++) if (free(r, c)) aw.add(key(r, c));
+    autoWater = aw;
+  }
+
   // Confirmed ships = orthogonal runs of ship cells whose every orthogonal
-  // neighbour is water or the border (i.e. the ship is fully boxed in). Tick
-  // those off against the required fleet.
+  // neighbour is water (incl. auto-water) or the border. Tick those off against
+  // the required fleet, and remember their cells so draw() renders them solid.
   function computeFleet() {
     const seen = new Set();
     const lens = [];
+    const confirmed = new Set();
     for (let r = 0; r < R; r++)
       for (let c = 0; c < C; c++) {
         if (!isShip(r, c) || seen.has(key(r, c))) continue;
@@ -132,10 +158,12 @@
             }
           }
         }
-        if (boxed) lens.push(comp.length);
+        if (boxed) {
+          lens.push(comp.length);
+          for (const [cr, cc] of comp) confirmed.add(key(cr, cc));
+        }
       }
-    // Build the tray: fleet lengths (desc), each ticked if a confirmed ship of
-    // that length is still unclaimed.
+    confirmedCells = confirmed;
     const pool = lens.slice();
     fleetState = puzzle.fleet.map((len) => {
       const i = pool.indexOf(len);
@@ -174,6 +202,7 @@
     onprogress?.({ ship: [...ship], water: [...water], done });
     if (!done && isWin()) {
       done = true;
+      recount();
       onfinish?.({ won: true, tier: puzzle.tier, size: `${R}×${C}`, fleet: puzzle.fleet });
     }
     draw();
@@ -231,16 +260,14 @@
     dragTool = evt.button === 2 ? 'water' : mode;
 
     if (dragTool === 'water') {
-      // paint water; erase if the first cell is already water
-      strokeTarget = isWater(p.r, p.c) && !givenWater.has(key(p.r, p.c)) ? 'empty' : 'water';
+      strokeTarget = water.has(key(p.r, p.c)) ? 'empty' : 'water';
       strokeDecided = true;
       setCell(p.r, p.c, strokeTarget);
       commit();
     } else {
-      // ship tool: long-press => quick water mark (mobile)
       longTimer = setTimeout(() => {
         if (dragging && !moved) {
-          setCell(p.r, p.c, isWater(p.r, p.c) ? 'empty' : 'water');
+          setCell(p.r, p.c, water.has(key(p.r, p.c)) ? 'empty' : 'water');
           commit();
           dragging = false;
         }
@@ -261,7 +288,7 @@
     } else return;
 
     if (dragTool === 'ship' && !strokeDecided) {
-      strokeTarget = isShip(p.r, p.c) && !givenShip.has(key(p.r, p.c)) ? 'empty' : 'ship';
+      strokeTarget = ship.has(key(p.r, p.c)) ? 'empty' : 'ship';
       strokeDecided = true;
     }
     setCell(p.r, p.c, strokeTarget);
@@ -277,10 +304,8 @@
     if (!dragging) return;
     dragging = false;
     if (!moved) {
-      // a plain tap
       if (dragTool === 'ship') cycle(lastCell.r, lastCell.c);
       commit();
-      // (water tap already applied on down)
     }
   }
 
@@ -319,6 +344,25 @@
     ctx.closePath();
   }
 
+  // two little wavy strokes centred in a cell = water
+  function drawWaves(x, y, color) {
+    const cx = x + cell / 2;
+    const cy = y + cell / 2;
+    const w = cell * 0.5;
+    const amp = cell * 0.06;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1.4, cell * 0.05);
+    ctx.lineCap = 'round';
+    for (const dy of [-cell * 0.12, cell * 0.12]) {
+      ctx.beginPath();
+      const x0 = cx - w / 2;
+      ctx.moveTo(x0, cy + dy);
+      ctx.quadraticCurveTo(x0 + w * 0.25, cy + dy - amp, x0 + w * 0.5, cy + dy);
+      ctx.quadraticCurveTo(x0 + w * 0.75, cy + dy + amp, x0 + w, cy + dy);
+      ctx.stroke();
+    }
+  }
+
   function draw() {
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
@@ -327,21 +371,22 @@
     ctx.clearRect(0, 0, w, h);
 
     const surface = cssVar('--surface-2', '#fff');
-    const border = cssVar('--border-col', '#111');
     const muted = cssVar('--muted', '#94a3b8');
     const ink = cssVar('--ink', '#0f172a');
     const shipCol = cssVar('--ink', '#0f172a');
     const givenCol = cssVar('--accent-2', '#a855f7');
     const GREEN = cssVar('--good', '#16a34a');
     const RED = cssVar('--bad', '#e0404a');
+    const waterCol = 'rgba(56,132,222,0.85)'; // player / auto water
+    const givenWaterCol = givenCol; // given water = purple, matches given ships
 
     // grid background
     ctx.fillStyle = surface;
     ctx.fillRect(originX, originY, C * cell, R * cell);
 
     // grid lines
-    ctx.strokeStyle = border;
-    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = ink;
+    ctx.globalAlpha = 0.28;
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let c = 0; c <= C; c++) {
@@ -354,42 +399,34 @@
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
-    // outer frame heavier
     ctx.strokeStyle = ink;
     ctx.lineWidth = 2;
     ctx.strokeRect(originX + 0.5, originY + 0.5, C * cell, R * cell);
 
-    // clues
-    ctx.font = `700 ${Math.round(cell * 0.42)}px var(--mono, ui-monospace, monospace)`;
+    // clues: current / clue
+    const fsz = Math.round(cell * 0.34);
+    ctx.font = `700 ${fsz}px var(--mono, ui-monospace, monospace)`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let c = 0; c < C; c++) {
       const cur = colCount[c];
       const clue = puzzle.colClues[c];
       ctx.fillStyle = cur === clue ? GREEN : cur > clue ? RED : ink;
-      ctx.fillText(String(clue), originX + c * cell + cell / 2, originY - cell * 0.46);
+      ctx.fillText(`${cur}/${clue}`, originX + c * cell + cell / 2, originY - cell * 0.52);
     }
-    ctx.textAlign = 'center';
     for (let r = 0; r < R; r++) {
       const cur = rowCount[r];
       const clue = puzzle.rowClues[r];
       ctx.fillStyle = cur === clue ? GREEN : cur > clue ? RED : ink;
-      ctx.fillText(String(clue), originX + C * cell + cell * 0.7, originY + r * cell + cell / 2);
+      ctx.fillText(`${cur}/${clue}`, originX + C * cell + cell * 0.85, originY + r * cell + cell / 2);
     }
 
-    // water marks (small dots), ships (merged rounded capsules)
+    // cells: water (waves) + ships (merged capsules; faded until confirmed)
     for (let r = 0; r < R; r++) {
       for (let c = 0; c < C; c++) {
         const x = originX + c * cell;
         const y = originY + r * cell;
-        if (isWater(r, c)) {
-          ctx.fillStyle = givenWater.has(key(r, c)) ? givenCol : muted;
-          ctx.globalAlpha = givenWater.has(key(r, c)) ? 0.9 : 0.55;
-          ctx.beginPath();
-          ctx.arc(x + cell / 2, y + cell / 2, Math.max(2.5, cell * 0.1), 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha = 1;
-        } else if (isShip(r, c)) {
+        if (isShip(r, c)) {
           const m = cell * 0.16;
           const n = isShip(r - 1, c);
           const s = isShip(r + 1, c);
@@ -401,6 +438,7 @@
           const y1 = y + cell - (s ? 0 : m);
           const single = !n && !s && !e && !wst;
           ctx.fillStyle = givenShip.has(key(r, c)) ? givenCol : shipCol;
+          ctx.globalAlpha = confirmedCells.has(key(r, c)) ? 1 : 0.4;
           if (single) {
             ctx.beginPath();
             ctx.arc(x + cell / 2, y + cell / 2, (cell - 2 * m) / 2, 0, Math.PI * 2);
@@ -409,6 +447,9 @@
             roundRect(x0, y0, x1 - x0, y1 - y0, cell * 0.28);
             ctx.fill();
           }
+          ctx.globalAlpha = 1;
+        } else if (isWater(r, c)) {
+          drawWaves(x, y, givenWater.has(key(r, c)) ? givenWaterCol : waterCol);
         }
       }
     }
@@ -425,8 +466,8 @@
 
 <div class="bs" bind:this={wrap}>
   <p class="hint">
-    Find the fleet. Numbers count ship segments in each column / row. Ships are
-    straight and never touch, not even diagonally.
+    Find the fleet. Each clue shows placed / required ship segments for that
+    column or row. Ships are straight and never touch, not even diagonally.
   </p>
 
   <canvas
@@ -443,7 +484,7 @@
 
   <div class="fleet" aria-label="Fleet">
     {#each fleetState as f}
-      <span class="ship" class:done={f.done} title={`Ship of ${f.len}`}>
+      <span class="ship" class:done={f.done} title={f.done ? `Ship of ${f.len} — done` : `Ship of ${f.len}`}>
         {#each Array(f.len) as _}<i></i>{/each}
       </span>
     {/each}
@@ -460,7 +501,8 @@
 
   <p class="legend">
     Desktop: <b>left-click</b> cycles empty → ship → water, <b>right-click</b> = water.
-    Mobile: pick a tool and <b>drag</b>; <b>long-press</b> = water.
+    Mobile: pick a tool and <b>drag</b>; <b>long-press</b> = water. Faded ships aren't
+    boxed in yet.
   </p>
 </div>
 
@@ -507,10 +549,10 @@
     height: 12px;
     border-radius: 3px;
     background: var(--ink);
-    opacity: 0.45;
+    opacity: 0.4;
   }
   .ship.done {
-    background: color-mix(in srgb, var(--good) 22%, transparent);
+    background: color-mix(in srgb, var(--good) 24%, transparent);
   }
   .ship.done i {
     opacity: 1;
