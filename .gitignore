@@ -14,6 +14,3 @@ __pycache__/
 
 # wrangler local cache/state (may hold account ids)
 .wrangler/
-
-# internal build recipe (contains personal email / infra details)
-docs/DAILY_PUZZLE_PLAYBOOK.md
