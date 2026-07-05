@@ -470,7 +470,7 @@ import datetime
 ANCHOR = datetime.date(2026, 7, 3)  # [2026, monthIndex 6, 3]
 
 # Grid size + fleet per difficulty tier (calibrated against Krazydad tiers).
-TIER_SIZE = {"beginner": 4, "easy": 5, "medium": 6, "hard": 7, "expert": 8}
+TIER_SIZE = {"beginner": 4, "easy": 5, "medium": 6, "hard": 7, "expert": 8, "master": 10}
 SIZE_TIER = {v: k for k, v in TIER_SIZE.items()}
 FLEET_BY_SIZE = {
     4: [2, 1, 1],
@@ -478,17 +478,29 @@ FLEET_BY_SIZE = {
     6: [3, 2, 2, 1],
     7: [4, 3, 2, 1],
     8: [4, 3, 2, 2, 1],
+    # Classic Solitaire Battleships fleet: 1x battleship, 2x cruiser,
+    # 3x destroyer, 4x submarine (20 ship cells).
+    10: [4, 3, 3, 2, 2, 2, 1, 1, 1, 1],
 }
 
 # Established weekly ramp by REAL weekday (Mon=0 .. Sun=6):
 #   Mon 4x4 · Tue 5x5 · Wed 6x6 · Thu 7x7 · Fri 8x8 · Sat 7x7 · Sun 7x7
 SIZE_BY_WEEKDAY = {0: 4, 1: 5, 2: 6, 3: 7, 4: 8, 5: 7, 6: 7}
 
-# Days never regenerated (already released / kept as-is).
-PRESERVE = {-1, 0}
+# Players found the weekday ramp too easy. From 2026-07-06 (day idx 3) onward we
+# switch every day to a full 10x10 board with the classic fleet, and watch how
+# the week lands before deciding whether to keep it. Days before this stay on the
+# original ramp (they are already released anyway).
+FLAT_10_FROM = 3
+
+# Days never regenerated (already released / kept as-is): buffer day -1 (2026-07-02)
+# through today (2026-07-05, day idx 2).
+PRESERVE = {-1, 0, 1, 2}
 
 
 def size_for(idx):
+    if idx >= FLAT_10_FROM:
+        return 10
     d = ANCHOR + datetime.timedelta(days=idx)
     return SIZE_BY_WEEKDAY[d.weekday()]
 

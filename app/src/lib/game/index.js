@@ -14,7 +14,8 @@ const TIER_EMOJI = {
   easy: '🟢',
   medium: '🟡',
   hard: '🟠',
-  expert: '🔴'
+  expert: '🔴',
+  master: '🔴'
 };
 
 export const GAME = {
