@@ -65,6 +65,8 @@
   let cell = 40;
   let originX = 0;
   let originY = 0;
+  let layoutW = 0; // canvas intrinsic (CSS) size before any max-width scaling
+  let layoutH = 0;
   let accent = '#fdc800';
 
   function layout(cssW) {
@@ -80,6 +82,8 @@
     if (!wrap || !canvas) return;
     const cssW = Math.min(wrap.clientWidth, 580);
     const { w, h } = layout(cssW);
+    layoutW = w;
+    layoutH = h;
     const dpr = window.devicePixelRatio || 1;
     canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
@@ -237,8 +241,13 @@
 
   function cellAt(evt) {
     const rect = canvas.getBoundingClientRect();
-    const x = evt.clientX - rect.left - originX;
-    const y = evt.clientY - rect.top - originY;
+    // The canvas may be scaled down on screen (CSS max-width: 100%), so its
+    // displayed size can differ from the layout size that cell/originX use.
+    // Map the pointer from displayed pixels back into layout pixels.
+    const sx = rect.width ? layoutW / rect.width : 1;
+    const sy = rect.height ? layoutH / rect.height : 1;
+    const x = (evt.clientX - rect.left) * sx - originX;
+    const y = (evt.clientY - rect.top) * sy - originY;
     const c = Math.floor(x / cell);
     const r = Math.floor(y / cell);
     if (!inGrid(r, c)) return null;
