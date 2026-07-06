@@ -48,11 +48,10 @@ export const GAME = {
     const size = result?.size ? ` ${result.size}` : '';
     const badge = result?.won ? '🚢✅' : '🚢';
     const score = GAME.scoreOf(result);
-    const scoreStr = score != null ? ` · ${score} pts` : '';
+    const scoreStr = score != null ? ` · ${score}/50` : '';
     return [
-      `${GAME.title} #${dayIdx}`,
-      `${badge} ${tier}${size}${t ? ' · ' + t : ''}${scoreStr}`.trim(),
-      url
+      `${url} #${dayIdx}`,
+      `${badge} ${tier}${size}${t ? ' · ' + t : ''}${scoreStr}`.trim()
     ].join('\n');
   }
 };
