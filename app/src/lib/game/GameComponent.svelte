@@ -38,9 +38,51 @@
   }
   const solutionShips = new Set(puzzle.solution.map(([r, c]) => key(r, c)));
 
+  // Individual ships in the solution (orthogonal runs), used by the hint system
+  // to reveal a whole ship of a chosen size.
+  const solutionFleet = (() => {
+    const seen = new Set();
+    const ships = [];
+    for (const k of solutionShips) {
+      if (seen.has(k)) continue;
+      const [r0, c0] = k.split(',').map(Number);
+      const stack = [[r0, c0]];
+      seen.add(k);
+      const cells = [];
+      while (stack.length) {
+        const [cr, cc] = stack.pop();
+        cells.push([cr, cc]);
+        for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const nr = cr + dr,
+            nc = cc + dc,
+            nk = key(nr, nc);
+          if (solutionShips.has(nk) && !seen.has(nk)) {
+            seen.add(nk);
+            stack.push([nr, nc]);
+          }
+        }
+      }
+      ships.push({ len: cells.length, cells });
+    }
+    return ships;
+  })();
+
+  // --- scoring --------------------------------------------------------------
+  // Base 50. Each hint of a size costs size² (4→16, 3→9, 2→4, 1→1). A standard
+  // fleet (1×4,2×3,3×2,4×1) sums to exactly 50, so hinting everything floors at 0.
+  const BASE_SCORE = 50;
+  const hintPenalty = (len) => len * len;
+  const scoreFor = (hints) =>
+    Math.max(0, BASE_SCORE - (hints || []).reduce((s, l) => s + hintPenalty(l), 0));
+
   // --- mutable player state -------------------------------------------------
   let ship = new Set(saved?.ship ?? []); // player-marked ship cells
   let water = new Set(saved?.water ?? []); // player-marked water cells
+  let hintShip = new Set(saved?.hintShip ?? []); // ship cells revealed by a hint
+  let hintWater = new Set(saved?.hintWater ?? []); // water around revealed ships
+  let hintsUsed = $state(saved?.hintsUsed ?? []); // sizes revealed, for scoring
+  let showHint = $state(false); // hint picker open
+  let hintMenu = $state([]); // [{len, penalty, available}]
   let mode = $state('ship'); // mobile tool: 'ship' | 'water'
   let done = $state(saved?.done ?? false);
   let rowCount = $state(new Array(R).fill(0));
@@ -54,11 +96,20 @@
   let autoWater = new Set(); // water forced by a saturated row/col
   let confirmedCells = new Set(); // ship cells that belong to a boxed-in ship
 
-  // effective state of a cell, givens + auto-water included
-  const isShip = (r, c) => givenShip.has(key(r, c)) || ship.has(key(r, c));
+  // effective state of a cell, givens + hints + auto-water included
+  const isShip = (r, c) =>
+    givenShip.has(key(r, c)) || hintShip.has(key(r, c)) || ship.has(key(r, c));
   const isWater = (r, c) =>
-    givenWater.has(key(r, c)) || water.has(key(r, c)) || autoWater.has(key(r, c));
-  const isLocked = (r, c) => givenShip.has(key(r, c)) || givenWater.has(key(r, c));
+    givenWater.has(key(r, c)) ||
+    hintWater.has(key(r, c)) ||
+    water.has(key(r, c)) ||
+    autoWater.has(key(r, c));
+  // Given and hint-revealed cells are truth: locked from player edits.
+  const isLocked = (r, c) =>
+    givenShip.has(key(r, c)) ||
+    givenWater.has(key(r, c)) ||
+    hintShip.has(key(r, c)) ||
+    hintWater.has(key(r, c));
 
   // --- geometry -------------------------------------------------------------
   let wrap, canvas, ctx;
@@ -182,6 +233,7 @@
   function isWin() {
     let all = new Set(givenShip);
     for (const k of ship) all.add(k);
+    for (const k of hintShip) all.add(k);
     if (all.size !== solutionShips.size) return false;
     for (const k of all) if (!solutionShips.has(k)) return false;
     return true;
@@ -203,11 +255,25 @@
 
   function commit() {
     recount();
-    onprogress?.({ ship: [...ship], water: [...water], done });
+    onprogress?.({
+      ship: [...ship],
+      water: [...water],
+      hintShip: [...hintShip],
+      hintWater: [...hintWater],
+      hintsUsed: [...hintsUsed],
+      done
+    });
     if (!done && isWin()) {
       done = true;
       recount();
-      onfinish?.({ won: true, tier: puzzle.tier, size: `${R}×${C}`, fleet: puzzle.fleet });
+      onfinish?.({
+        won: true,
+        tier: puzzle.tier,
+        size: `${R}×${C}`,
+        fleet: puzzle.fleet,
+        hintsUsed: [...hintsUsed],
+        score: scoreFor(hintsUsed)
+      });
     }
     draw();
   }
@@ -336,6 +402,57 @@
     commit();
   }
 
+  // --- hints ----------------------------------------------------------------
+  // A solution ship of `len` that hasn't been revealed by a hint AND isn't
+  // already fully placed by the player is a candidate to reveal.
+  function candidatesFor(len) {
+    return solutionFleet.filter(
+      (s) =>
+        s.len === len &&
+        !s.cells.every(([r, c]) => hintShip.has(key(r, c)) || ship.has(key(r, c)))
+    );
+  }
+
+  function openHint() {
+    if (done) return;
+    const sizes = [...new Set(puzzle.fleet)].sort((a, b) => b - a);
+    hintMenu = sizes.map((len) => ({
+      len,
+      penalty: hintPenalty(len),
+      available: candidatesFor(len).length > 0
+    }));
+    showHint = true;
+  }
+
+  // Reveal a random ship of `len`: lock its cells as ship and the surrounding
+  // ring as water (ships never touch), all rendered purple like givens.
+  function revealHint(len) {
+    const cands = candidatesFor(len);
+    if (!cands.length) return;
+    const pick = cands[Math.floor(Math.random() * cands.length)];
+    firstTouch();
+    for (const [r, c] of pick.cells) {
+      const k = key(r, c);
+      hintShip.add(k);
+      ship.delete(k);
+      water.delete(k);
+    }
+    for (const [r, c] of pick.cells)
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = r + dr,
+            nc = c + dc,
+            nk = key(nr, nc);
+          if (!inGrid(nr, nc) || solutionShips.has(nk) || hintShip.has(nk)) continue;
+          hintWater.add(nk);
+          ship.delete(nk);
+          water.delete(nk);
+        }
+    hintsUsed = [...hintsUsed, len];
+    showHint = false;
+    commit();
+  }
+
   // --- drawing --------------------------------------------------------------
   function cssVar(name, fallback) {
     const v = getComputedStyle(canvas).getPropertyValue(name).trim();
@@ -446,7 +563,8 @@
           const x1 = x + cell - (e ? 0 : m);
           const y1 = y + cell - (s ? 0 : m);
           const single = !n && !s && !e && !wst;
-          ctx.fillStyle = givenShip.has(key(r, c)) ? givenCol : shipCol;
+          ctx.fillStyle =
+            givenShip.has(key(r, c)) || hintShip.has(key(r, c)) ? givenCol : shipCol;
           ctx.globalAlpha = confirmedCells.has(key(r, c)) ? 1 : 0.4;
           if (single) {
             ctx.beginPath();
@@ -458,7 +576,11 @@
           }
           ctx.globalAlpha = 1;
         } else if (isWater(r, c)) {
-          drawWaves(x, y, givenWater.has(key(r, c)) ? givenWaterCol : waterCol);
+          drawWaves(
+            x,
+            y,
+            givenWater.has(key(r, c)) || hintWater.has(key(r, c)) ? givenWaterCol : waterCol
+          );
         }
       }
     }
@@ -504,9 +626,19 @@
       <button class:active={mode === 'ship'} onclick={() => (mode = 'ship')}>🚢 Ship</button>
       <button class:active={mode === 'water'} onclick={() => (mode = 'water')}>🌊 Water</button>
     </div>
+    <button class="hintbtn" onclick={openHint} disabled={done} title="Reveal a ship — costs points">
+      💡 Hint <span class="cost">−pts</span>
+    </button>
     <button class="ghost" onclick={undo} disabled={!canUndo}>↶ Undo</button>
     <button class="ghost" onclick={clearAll}>Reset</button>
   </div>
+
+  {#if hintsUsed.length}
+    <p class="hintsused">
+      Score so far: <b>{scoreFor(hintsUsed)}</b> / {BASE_SCORE}
+      · {hintsUsed.length} hint{hintsUsed.length > 1 ? 's' : ''} used
+    </p>
+  {/if}
 
   <p class="legend">
     Desktop: <b>left-click</b> cycles empty → ship → water, <b>right-click</b> = water.
@@ -514,6 +646,38 @@
     boxed in yet.
   </p>
 </div>
+
+{#if showHint}
+  <div
+    class="hint-overlay"
+    role="button"
+    tabindex="-1"
+    onclick={() => (showHint = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showHint = false)}
+  >
+    <div class="hint-sheet" role="dialog" aria-label="Reveal a ship" onclick={(e) => e.stopPropagation()}>
+      <h3>💡 Reveal a ship</h3>
+      <p class="hint-note">
+        Pick a size. A random ship of that size is revealed in <span class="purple">purple</span> and
+        locked in. Each hint costs points off your final score.
+      </p>
+      <div class="hint-opts">
+        {#each hintMenu as opt}
+          <button
+            class="hint-opt"
+            disabled={!opt.available}
+            onclick={() => revealHint(opt.len)}
+            title={opt.available ? `Reveal a ${opt.len}-cell ship` : 'No ships of this size left to reveal'}
+          >
+            <span class="hint-boat">{#each Array(opt.len) as _}<i></i>{/each}</span>
+            <span class="hint-cost">−{opt.penalty}</span>
+          </button>
+        {/each}
+      </div>
+      <button class="ghost hint-cancel" onclick={() => (showHint = false)}>Cancel</button>
+    </div>
+  </div>
+{/if}
 
 <style>
   .bs {
@@ -613,5 +777,110 @@
     color: var(--muted, #64748b);
     font-size: 0.8rem;
     line-height: 1.4;
+  }
+  .hintbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 2px solid var(--accent-2, #a855f7);
+    background: color-mix(in srgb, var(--accent-2, #a855f7) 12%, var(--surface-2, #fff));
+    color: var(--ink, #0f172a);
+    padding: 0.5rem 0.8rem;
+    border-radius: 0.6rem;
+    font-size: 0.95rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .hintbtn .cost {
+    font-family: var(--mono, ui-monospace, monospace);
+    font-size: 0.75rem;
+    color: var(--accent-2, #a855f7);
+  }
+  .hintbtn:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+  .hintsused {
+    margin: 0;
+    text-align: center;
+    color: var(--muted, #64748b);
+    font-size: 0.85rem;
+  }
+  .hintsused b {
+    color: var(--accent-2, #a855f7);
+    font-family: var(--mono, ui-monospace, monospace);
+  }
+  .hint-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.55);
+  }
+  .hint-sheet {
+    background: var(--surface-2, #fff);
+    border: 2px solid var(--ink, #111);
+    box-shadow: var(--shadow, 4px 4px 0 rgba(0, 0, 0, 0.2));
+    border-radius: 0.9rem;
+    padding: 1.25rem;
+    max-width: 22rem;
+    width: 100%;
+    text-align: center;
+  }
+  .hint-sheet h3 {
+    margin: 0 0 0.4rem;
+    font-size: 1.15rem;
+  }
+  .hint-note {
+    margin: 0 0 1rem;
+    color: var(--muted, #64748b);
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+  .hint-note .purple {
+    color: var(--accent-2, #a855f7);
+    font-weight: 700;
+  }
+  .hint-opts {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 0.9rem;
+  }
+  .hint-opt {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border: 2px solid var(--ink, #111);
+    background: var(--surface, #fff);
+    border-radius: 0.6rem;
+    padding: 0.55rem 0.8rem;
+    cursor: pointer;
+  }
+  .hint-opt:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .hint-boat {
+    display: inline-flex;
+    gap: 3px;
+  }
+  .hint-boat i {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    background: var(--accent-2, #a855f7);
+  }
+  .hint-cost {
+    font-family: var(--mono, ui-monospace, monospace);
+    font-weight: 800;
+    color: var(--accent-2, #a855f7);
+  }
+  .hint-cancel {
+    width: 100%;
   }
 </style>

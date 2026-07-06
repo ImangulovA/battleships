@@ -210,7 +210,22 @@
       <div class="bigstats">
         <div><span class="num">{record.result?.size ?? '—'}</span><span class="lbl">grid</span></div>
         <div><span class="num">{fmtTime(record.elapsedMs)}</span><span class="lbl">time</span></div>
+        {#if record.result?.won && GAME.scoreOf}
+          {@const sc = GAME.scoreOf(record.result)}
+          {#if sc != null}
+            <div><span class="num score">{sc}</span><span class="lbl">score</span></div>
+          {/if}
+        {/if}
       </div>
+
+      {#if record.result?.won && (record.result?.hintsUsed?.length ?? 0) === 0}
+        <p class="perfect">✨ Perfect: no hints used!</p>
+      {:else if record.result?.won && record.result?.hintsUsed?.length}
+        <p class="hintline">
+          {record.result.hintsUsed.length} hint{record.result.hintsUsed.length > 1 ? 's' : ''} used
+          (−{record.result.hintsUsed.reduce((s, l) => s + l * l, 0)} pts)
+        </p>
+      {/if}
 
       {#if record.result?.won}
         {@const t = speedTier()}
@@ -357,6 +372,20 @@
   }
   .grow .num {
     font-size: 22px;
+  }
+  .num.score {
+    color: var(--accent-2);
+  }
+  .perfect {
+    color: var(--accent-2);
+    font-weight: 700;
+    font-size: 14px;
+    margin: 0;
+  }
+  .hintline {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0;
   }
   .lbl {
     color: var(--muted);
