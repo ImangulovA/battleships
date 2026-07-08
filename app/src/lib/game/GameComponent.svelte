@@ -230,12 +230,64 @@
     });
   }
 
+  // A board wins when the placed ships satisfy the RULES — not when they match one
+  // specific stored solution. That means any legal fleet arrangement consistent
+  // with the clues is accepted (puzzles are still generated to be unique, but this
+  // is what the player can actually see: clues + fleet + no-touch).
   function isWin() {
-    let all = new Set(givenShip);
+    const all = new Set(givenShip);
     for (const k of ship) all.add(k);
     for (const k of hintShip) all.add(k);
-    if (all.size !== solutionShips.size) return false;
-    for (const k of all) if (!solutionShips.has(k)) return false;
+
+    // Ships can never sit on a revealed water cell.
+    for (const k of all) if (givenWater.has(k)) return false;
+
+    // Row / column clue counts must match exactly.
+    const rc = new Array(R).fill(0);
+    const cc = new Array(C).fill(0);
+    for (const k of all) {
+      const [r, c] = k.split(',').map(Number);
+      rc[r]++;
+      cc[c]++;
+    }
+    for (let r = 0; r < R; r++) if (rc[r] !== puzzle.rowClues[r]) return false;
+    for (let c = 0; c < C; c++) if (cc[c] !== puzzle.colClues[c]) return false;
+
+    // No two ships touch, not even diagonally. (This also forces every
+    // orthogonally-connected run to be straight — an L-bend has a diagonal pair.)
+    for (const k of all) {
+      const [r, c] = k.split(',').map(Number);
+      for (const [dr, dc] of [[-1, -1], [-1, 1], [1, -1], [1, 1]])
+        if (all.has(key(r + dr, c + dc))) return false;
+    }
+
+    // Component lengths (orthogonal runs) must match the required fleet exactly.
+    const seen = new Set();
+    const lens = [];
+    for (const k of all) {
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const [sr, sc] = k.split(',').map(Number);
+      const stack = [[sr, sc]];
+      let size = 0;
+      while (stack.length) {
+        const [r, c] = stack.pop();
+        size++;
+        for (const [dr, dc] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const nk = key(r + dr, c + dc);
+          if (all.has(nk) && !seen.has(nk)) {
+            seen.add(nk);
+            stack.push([r + dr, c + dc]);
+          }
+        }
+      }
+      lens.push(size);
+    }
+    const want = puzzle.fleet.slice().sort((a, b) => a - b);
+    const have = lens.sort((a, b) => a - b);
+    if (want.length !== have.length) return false;
+    for (let i = 0; i < want.length; i++) if (want[i] !== have[i]) return false;
+
     return true;
   }
 

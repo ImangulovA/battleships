@@ -381,10 +381,15 @@ def _solve_one(R, C, fleet, seed):
     row_clues = [sum(grid[r][c] == SHIP for c in range(C)) for r in range(R)]
     col_clues = [sum(grid[r][c] == SHIP for r in range(R)) for c in range(C)]
 
-    # NO-GUESS construction: reveal grid cells (with their true value / part type)
-    # in row-major order until the logic solver fully determines the board. Every
-    # revealed fact is true, so the true solution stays valid and the loop
-    # converges (worst case: reveal everything).
+    # NO-GUESS construction: reveal grid cells in row-major order until the logic
+    # solver fully determines the board. Every revealed fact is true, so the true
+    # solution stays valid and the loop converges (worst case: reveal everything).
+    #
+    # ORIENTATION-FREE: ship hints are revealed as a plain "ship" (no single/end/
+    # mid part type). Uniqueness must therefore hold from ship/water hints + clues
+    # + fleet + no-touch ALONE — which is exactly what the player can see. This is
+    # a stricter requirement than the old part-typed reveal, so some placements now
+    # need more hints (or fail and get retried).
     given_cells = []          # list of (r, c, type)
     given_set = set()
     target = {(r, c) for r in range(R) for c in range(C) if grid[r][c] == SHIP}
@@ -402,7 +407,7 @@ def _solve_one(R, C, fleet, seed):
             for c in range(C):
                 if (r, c) in given_set or ls.cell[r][c] != UNK:
                     continue
-                t = "water" if grid[r][c] == WATER else part_type(grid, r, c)
+                t = "water" if grid[r][c] == WATER else "ship"
                 given_cells.append((r, c, t))
                 given_set.add((r, c))
                 revealed = True
@@ -494,8 +499,11 @@ SIZE_BY_WEEKDAY = {0: 4, 1: 5, 2: 6, 3: 7, 4: 8, 5: 7, 6: 7}
 FLAT_10_FROM = 3
 
 # Days never regenerated (already released / kept as-is): buffer day -1 (2026-07-02)
-# through today (2026-07-05, day idx 2).
-PRESERVE = {-1, 0, 1, 2}
+# through today (2026-07-08, day idx 5). Released days keep their original
+# part-typed givens; the rule-based win check accepts any valid completion, so
+# their (now-visible) non-uniqueness is harmless. Days 6+ are regenerated to be
+# uniquely solvable WITHOUT orientation.
+PRESERVE = {-1, 0, 1, 2, 3, 4, 5}
 
 
 def size_for(idx):

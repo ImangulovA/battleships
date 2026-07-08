@@ -74,7 +74,12 @@ def main():
             if t == "water":
                 if (r, c) in ships:
                     given_ok = False
+            elif t == "ship":
+                # orientation-free hint: just asserts a ship sits here
+                if (r, c) not in ships:
+                    given_ok = False
             else:
+                # legacy part-typed hint (preserved released days)
                 if (r, c) not in ships or part_type(grid, r, c) != t:
                     given_ok = False
 
