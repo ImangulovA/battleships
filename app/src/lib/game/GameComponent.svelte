@@ -305,6 +305,35 @@
     canUndo = true;
   }
 
+  const winResult = () => ({
+    won: true,
+    tier: puzzle.tier,
+    size: `${R}×${C}`,
+    fleet: puzzle.fleet,
+    hintsUsed: [...hintsUsed],
+    score: scoreFor(hintsUsed)
+  });
+
+  // Finishing swaps the tall board for the shorter end screen, so the page
+  // reflows the moment we call onfinish. On touch, the browser still dispatches a
+  // synthetic `click` right after the finishing tap — landing on whatever element
+  // just moved under the finger (e.g. a footer link), which would silently open a
+  // new tab and "skip" the win screen. Swallow that one trailing click.
+  function swallowNextClick() {
+    if (typeof window === 'undefined') return;
+    const handler = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      cleanup();
+    };
+    const cleanup = () => {
+      window.removeEventListener('click', handler, true);
+      clearTimeout(t);
+    };
+    const t = setTimeout(cleanup, 700);
+    window.addEventListener('click', handler, true);
+  }
+
   function commit() {
     recount();
     onprogress?.({
@@ -318,14 +347,8 @@
     if (!done && isWin()) {
       done = true;
       recount();
-      onfinish?.({
-        won: true,
-        tier: puzzle.tier,
-        size: `${R}×${C}`,
-        fleet: puzzle.fleet,
-        hintsUsed: [...hintsUsed],
-        score: scoreFor(hintsUsed)
-      });
+      swallowNextClick();
+      onfinish?.(winResult());
     }
     draw();
   }
@@ -643,6 +666,15 @@
     fit();
     const ro = new ResizeObserver(() => fit());
     ro.observe(wrap);
+    // A board restored from storage may already be a winning position (e.g. it was
+    // completed before a win-rule change, so the end screen never fired). Detect
+    // that on load and finish — no cell toggle required. Deferred a tick so the
+    // parent's view swap doesn't unmount us mid-mount. No trailing click to
+    // swallow here since this isn't pointer-driven.
+    if (!done && isWin()) {
+      done = true;
+      setTimeout(() => onfinish?.(winResult()), 0);
+    }
     return () => ro.disconnect();
   });
 </script>
