@@ -387,7 +387,7 @@ def _solve_one(R, C, fleet, seed):
     #
     # ORIENTATION-FREE: ship hints are revealed as a plain "ship" (no single/end/
     # mid part type). Uniqueness must therefore hold from ship/water hints + clues
-    # + fleet + no-touch ALONE — which is exactly what the player can see. This is
+    # + fleet + no-touch ALONE, which is exactly what the player can see. This is
     # a stricter requirement than the old part-typed reveal, so some placements now
     # need more hints (or fail and get retried).
     given_cells = []          # list of (r, c, type)

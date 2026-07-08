@@ -230,7 +230,7 @@
     });
   }
 
-  // A board wins when the placed ships satisfy the RULES — not when they match one
+  // A board wins when the placed ships satisfy the RULES, not when they match one
   // specific stored solution. That means any legal fleet arrangement consistent
   // with the clues is accepted (puzzles are still generated to be unique, but this
   // is what the player can actually see: clues + fleet + no-touch).
@@ -254,7 +254,7 @@
     for (let c = 0; c < C; c++) if (cc[c] !== puzzle.colClues[c]) return false;
 
     // No two ships touch, not even diagonally. (This also forces every
-    // orthogonally-connected run to be straight — an L-bend has a diagonal pair.)
+    // orthogonally-connected run to be straight: an L-bend has a diagonal pair.)
     for (const k of all) {
       const [r, c] = k.split(',').map(Number);
       for (const [dr, dc] of [[-1, -1], [-1, 1], [1, -1], [1, 1]])
@@ -316,7 +316,7 @@
 
   // Finishing swaps the tall board for the shorter end screen, so the page
   // reflows the moment we call onfinish. On touch, the browser still dispatches a
-  // synthetic `click` right after the finishing tap — landing on whatever element
+  // synthetic `click` right after the finishing tap, landing on whatever element
   // just moved under the finger (e.g. a footer link), which would silently open a
   // new tab and "skip" the win screen. Swallow that one trailing click.
   function swallowNextClick() {
@@ -668,7 +668,7 @@
     ro.observe(wrap);
     // A board restored from storage may already be a winning position (e.g. it was
     // completed before a win-rule change, so the end screen never fired). Detect
-    // that on load and finish — no cell toggle required. Deferred a tick so the
+    // that on load and finish, no cell toggle required. Deferred a tick so the
     // parent's view swap doesn't unmount us mid-mount. No trailing click to
     // swallow here since this isn't pointer-driven.
     if (!done && isWin()) {
