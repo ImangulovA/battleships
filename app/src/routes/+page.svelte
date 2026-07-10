@@ -145,22 +145,66 @@
 
   let shared = $state('');
   let showBoard = $state(false); // end screen: reveal the solved board
+
+  // Last-resort copy for desktop browsers without navigator.share and without a
+  // secure-context clipboard (http/file://, older browsers). Uses a hidden
+  // textarea + execCommand('copy'), which works from a user gesture almost
+  // everywhere.
+  function legacyCopy(text) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function flashCopied() {
+    shared = 'Copied!';
+    setTimeout(() => (shared = ''), 2000);
+  }
+
   async function share() {
     const text = shareText();
-    try {
-      if (navigator.share) {
+
+    // Native share sheet (mainly mobile, some desktop browsers).
+    if (navigator.share) {
+      try {
         await navigator.share({ text });
         shared = '';
         return;
+      } catch (e) {
+        // User cancelled the share sheet on purpose — do nothing, don't copy.
+        if (e && e.name === 'AbortError') return;
+        // Any other failure: fall through to clipboard copy below.
       }
-    } catch (e) {
-      /* user cancelled — fall through to clipboard */
     }
-    try {
-      await navigator.clipboard.writeText(text);
-      shared = 'Copied!';
-      setTimeout(() => (shared = ''), 2000);
-    } catch (e) {
+
+    // Secure-context clipboard API.
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        flashCopied();
+        return;
+      } catch (e) {
+        /* fall through to legacy copy */
+      }
+    }
+
+    // Last resort for http/file:// and older desktop browsers.
+    if (legacyCopy(text)) {
+      flashCopied();
+    } else {
       shared = 'Copy failed';
     }
   }
