@@ -40,12 +40,15 @@
 
     if (record.finished) {
       view = 'end';
-      // Backfill stats for a day finished before the beacon fired (dropped
-      // beacon, or the global backend didn't exist yet). once() + server-side
-      // dedup by clientId make these idempotent, so re-sending is safe.
+      // Backfill stats for a day finished before the event was recorded (dropped
+      // request, or the global backend didn't exist yet). once() + server-side
+      // dedup by clientId make these idempotent, so re-sending is safe. Read the
+      // aggregates only after the finish is confirmed, so a recovered (earlier
+      // lost) solve is reflected in the counts.
       submitStart(dayIdx);
-      submitFinish(dayIdx, record.elapsedMs || 0, GAME.scoreOf ? GAME.scoreOf(record.result) : null);
-      loadAgg();
+      Promise.resolve(
+        submitFinish(dayIdx, record.elapsedMs || 0, GAME.scoreOf ? GAME.scoreOf(record.result) : null)
+      ).then(() => loadAgg({ settle: true }));
     } else if (record.started) {
       // Backfill a possibly-missed start beacon for an in-progress day.
       submitStart(dayIdx);
@@ -94,22 +97,33 @@
     persist();
   }
 
-  function handleFinish(result) {
+  async function handleFinish(result) {
     const ms = timer.stop();
     record.finished = true;
     record.finishedAt = Date.now();
     record.elapsedMs = ms;
     record.result = { ...result, ms };
     persist();
-    submitFinish(dayIdx, ms, GAME.scoreOf ? GAME.scoreOf(record.result) : null);
     view = 'end';
-    loadAgg();
+    // Wait for the finish to be recorded before reading aggregates, so the end
+    // screen counts our own solve. (settle: true adds a short buffer on top, in
+    // case D1's read-after-write lags slightly behind the write ack.)
+    await submitFinish(dayIdx, ms, GAME.scoreOf ? GAME.scoreOf(record.result) : null);
+    loadAgg({ settle: true });
   }
 
   // --- end screen -----------------------------------------------------------
-  async function loadAgg() {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  async function loadAgg({ settle = false } = {}) {
     if (!statsEnabled()) return;
     agg = await fetchAgg([dayIdx]);
+    if (settle) {
+      // Give a just-submitted finish a moment to become visible, then refresh
+      // so our own solve is reflected in the counts and time distribution.
+      await sleep(1200);
+      const fresh = await fetchAgg([dayIdx]);
+      if (fresh) agg = fresh;
+    }
   }
 
   function dayAgg() {
